@@ -104,6 +104,7 @@ export default {
         if (this.isLimit === '1') {
           return {
             url: '/api/fileupload/chunk',
+            key: '/api/fileupload/chunk/' + index,
             data: formData
           }
         } else {
@@ -138,8 +139,12 @@ export default {
       const uploadAxiosList = this.handleChunkAxios()
       if (this.isLimit === '1') {
         // 限制并发请求数量，切片上传结束后发起合并
-        this.limitWidthRequests(uploadAxiosList, 6, (res) => {
-          console.log(res)
+        // this.limitWithRequests(uploadAxiosList, 6, (res) => {
+        //   console.log(res)
+        //   this.handleFileEnd()
+        // })
+        this.limitWithRequestsPromise(uploadAxiosList, 6).then(res => {
+          console.log('所有切片请求结果：', res)
           this.handleFileEnd()
         })
       } else {
@@ -151,8 +156,36 @@ export default {
         })
       }
     },
-    // 限制并非请求数量
-    limitWidthRequests(requestList = [], max = 6, callback) {
+    /**
+     * @description 限制并发请求数量（promise）
+     * @param {requestList} 请求接口列表
+     * @param {max} 请求限制的并发大小
+     */
+    limitWithRequestsPromise(requestList, max = 6) {
+      const apiList = [...requestList]
+      let map = new Map()
+      const run = () => {
+        if (apiList.length) {
+          const api = apiList.shift()
+          this.uploadStatus = 'loading'
+          return axios.post(api.url, api.data).then(res => {
+            this.uploadProgress++
+            console.log(this.uploadProgress, res.data)
+            // 发起下一个切片上传
+            map.set(api.key, res.data) // 记录每个请求结果，防止执行顺序和返回顺序错乱
+            return run()
+          })
+        }
+      }
+      // 获取请求列表和最大并发请求数量的最小值，避免创建多余promie
+      const promiseList = Array(Math.min(apiList.length, max)).fill(Promise.resolve()).map(promise => promise.then(run))
+      return Promise.all(promiseList).then(() => {
+        // 返回所有切片请求结果
+        return requestList.map(item => map.get(item.key))
+      })
+    },
+    // 限制并发请求数量
+    limitWithRequests(requestList = [], max = 6, callback) {
       const limitNum = Math.min(requestList.length, max)
       let count = 0
       const run = () => {
